@@ -45,7 +45,7 @@ Self-liquidation - Users can liquidate their own positions. This follows Aave V3
 
 ## Links
 
-- **Previous audits:**  Halborn Security September 2025. WatchPug 4 audit rounds - October 2025 – March 2026
+- **Previous audits:** [Halborn Security September 2025](https://github.com/code-423n4/2026-04-k2/blob/main/k2-borrow-lend-protocol-ssc.pdf). [WatchPug 4 audit rounds - October 2025 – March 2026](https://github.com/code-423n4/2026-04-k2/blob/main/k2-watchpug-audit-report-rev3.pdf)
   - ✅ SCOUTS: If there are multiple report links, please format them in a list.
 - **Documentation:** https://github.com/Shapeshifter-Technologies/k2-contracts/tree/main/docs
 - **Website:** https://www.k2lend.com
