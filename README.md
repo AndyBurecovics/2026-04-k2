@@ -33,7 +33,7 @@
 
 [V12](https://v12.zellic.io/) is [Zellic](https://zellic.io)'s in-house AI auditing tool. It is the only autonomous auditor that [reliably finds Highs and Criticals](https://www.zellic.io/blog/introducing-v12/). All issues found by V12 will be judged as out of scope and ineligible for awards.
 
-V12 findings can be viewed below:
+V12 findings can be viewed in the files below, or [here](https://v12.sh/runs/1884/public):
 - [Critical severity output](https://github.com/code-423n4/2026-04-k2/blob/main/K2-V12-Critical-output.md)
 - [High severity output](https://github.com/code-423n4/2026-04-k2/blob/main/K2-V12-High-output.md)
 - [Medium and Low severity output](https://github.com/code-423n4/2026-04-k2/blob/main/K2-V12-Med-Low-output.md)
