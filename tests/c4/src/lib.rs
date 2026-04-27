@@ -633,34 +633,6 @@ fn test_poc_swap_collateral_bypasses_max_user_reserves() {
 }
 
 #[test]
-
-#[test]
-fn test_poc_prepare_liquidation_stale_hf() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let setup = Setup::new(&env);
-
-    let collateral: u128 = 10_000_000_000;
-    let borrow: u128 = 7_900_000_000;
-
-    setup.router.supply(&setup.user, &setup.asset_a, &collateral, &setup.user, &0u32);
-    setup.router.borrow(&setup.user, &setup.asset_b, &borrow, &1u32, &0u32, &setup.user);
-
-    env.ledger().with_mut(|l| l.timestamp += 10 * 365 * 24 * 3600);
-
-    let new_expiry = env.ledger().timestamp() + 604_800;
-    setup.oracle.set_manual_override(&setup.admin,
-        &price_oracle::Asset::Stellar(setup.asset_a.clone()),
-        &Some(PRICE_ONE_DOLLAR), &Some(new_expiry));
-    setup.oracle.set_manual_override(&setup.admin,
-        &price_oracle::Asset::Stellar(setup.asset_b.clone()),
-        &Some(PRICE_ONE_DOLLAR), &Some(new_expiry));
-
-    let account_data = setup.router.get_user_account_data(&setup.user);
-    println!("HF after 10 years: {}", account_data.health_factor);
-    println!("Liquidatable: {}", account_data.health_factor < k2_shared::WAD);
-}
-
 #[test]
 fn test_poc_set_collateral_bypasses_max_user_reserves() {
     let env = Env::default();
